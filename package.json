@@ -23,7 +23,7 @@
   "bugs": {
     "url": "https://github.com/VarunGaikwad/image-resizer/issues"
   },
-  "homepage": "hhttps://github.com/VarunGaikwad/image-resizer#readme",
+  "homepage": "https://github.com/VarunGaikwad/image-resizer#readme",
   "dependencies": {
     "archiver": "^7.0.1",
     "express": "^4.18.2",
