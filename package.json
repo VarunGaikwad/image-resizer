@@ -1,7 +1,7 @@
 {
   "name": "image-resizer",
   "version": "1.0.0",
-  "description": "A simple Node.js service to resize images using Sharp",
+  "description": "Resize and generate platform-specific icons (mobile, desktop, web, wearables) from a single image. Drag & drop interface with responsive design.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
