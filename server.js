@@ -11,6 +11,10 @@ const PORT = 5000;
 app.use(express.static("public"));
 app.use("/resized", express.static("resized"));
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 const upload = multer({ dest: "uploads/" });
 
 app.post("/resize", upload.single("image"), async (req, res) => {

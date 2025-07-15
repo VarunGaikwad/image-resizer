@@ -4,7 +4,8 @@
   "description": "A simple Node.js service to resize images using Sharp",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "npm install && mkdir -p uploads resized"
   },
   "author": "Varun Gaikwad<gaikwadvarun23@gmail.com>",
   "license": "MIT",
