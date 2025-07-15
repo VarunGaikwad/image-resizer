@@ -27,7 +27,7 @@ A simple web application to resize images into multiple icon sizes for different
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/image-resizer.git
+   git clone https://github.com/VarunGaikwad/image-resizer.git
    cd image-resizer
    ```
 
@@ -74,7 +74,7 @@ Upload an image, select icon sizes, and resize.
 - Accepts JSON body:
   ```json
   {
-  "files": ["image-24x24.png", "image-48x48.png"]
+    "files": ["image-24x24.png", "image-48x48.png"]
   }
   ```
 - Returns a ZIP archive of requested resized images.
@@ -106,7 +106,7 @@ Upload an image, select icon sizes, and resize.
 
 ## License
 
-MIT License © Your Name
+MIT License © Varun Gaikwd
 
 ---
 
