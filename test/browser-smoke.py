@@ -62,14 +62,32 @@ def run(url, screenshot_dir):
         try:
             context = browser.new_context(viewport={"width": 320, "height": 900}, reduced_motion="reduce")
             page = context.new_page()
+            page.add_init_script("""
+              window.previewUrls = [];
+              window.revokedUrls = [];
+              const create = URL.createObjectURL.bind(URL);
+              const revoke = URL.revokeObjectURL.bind(URL);
+              URL.createObjectURL = blob => {
+                const url = create(blob);
+                if (blob instanceof File) window.previewUrls.push(url);
+                return url;
+              };
+              URL.revokeObjectURL = url => { window.revokedUrls.push(url); revoke(url); };
+            """)
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url)
             page.wait_for_load_state("networkidle")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Mobile layout overflows"
+            expect(page.locator("#selectionCount")).to_have_text("0 sizes selected")
+            expect(page.locator("#imagePreview")).to_be_hidden()
+            expect(page.locator("#previewEmpty")).to_be_visible()
             if screenshot_dir:
                 screenshot_dir.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(screenshot_dir / "mobile.png"), full_page=True)
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.screenshot(path=str(screenshot_dir / "desktop-empty.png"), full_page=True)
+                page.set_viewport_size({"width": 320, "height": 900})
 
             # Reach the native picker with the keyboard, not a synthetic input change.
             page.keyboard.press("Tab")
@@ -78,6 +96,9 @@ def run(url, screenshot_dir):
                 page.keyboard.press("Enter")
             chooser.value.set_files({"name": "icon.png", "mimeType": "image/png", "buffer": png_image()})
             expect(page.locator("#selectedFile")).to_contain_text("icon.png")
+            expect(page.locator("#imagePreview")).to_be_visible()
+            expect(page.locator("#imageMeta")).to_contain_text("96 × 64 px")
+            first_preview = page.locator("#imagePreview").get_attribute("src")
             page.locator("#resizeButton").click()
             expect(page.locator("#error")).to_have_text("Select at least one size.")
             expect(page.locator('input[name="sizes"]').first).to_be_focused()
@@ -90,10 +111,14 @@ def run(url, screenshot_dir):
               document.querySelector('#dropArea').dispatchEvent(new DragEvent('drop', {dataTransfer: transfer, bubbles: true, cancelable: true}));
             }""", base64.b64encode(png_image()).decode())
             expect(page.locator("#selectedFile")).to_contain_text("dropped.png")
+            expect(page.locator("#imagePreview")).not_to_have_attribute("src", first_preview)
+            assert page.evaluate("url => window.revokedUrls.includes(url)", first_preview), "Replaced preview URL leaked"
+            expect(page.locator("#imageMeta")).to_contain_text("96 × 64 px")
             for checkbox in page.locator('input[value="16"]').all():
                 checkbox.check()
             page.locator('input[value="32"]').first.check()
             page.locator('input[value="128"]').check()
+            expect(page.locator("#selectionCount")).to_have_text("3 sizes selected")
 
             def busy(route):
                 route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": "Server is busy. Please retry shortly."}))
@@ -116,6 +141,9 @@ def run(url, screenshot_dir):
             held[0].continue_()
             page.unroute("**/resize")
             expect(page.locator("#resultLinks a")).to_have_count(2)
+            expect(page.locator("#resultCount")).to_have_text("2 icons generated")
+            expect(page.locator("#resultLinks a").first).to_have_text("16 × 16PNG · Download↓")
+            assert page.locator("#resultLinks a").first.get_attribute("download").endswith("-16x16.png")
             expect(page.locator("#status")).to_contain_text("128 pixels")
             expect(page.locator("#resizeButton")).to_be_enabled()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Download filenames overflow"
@@ -148,14 +176,61 @@ def run(url, screenshot_dir):
 
             if screenshot_dir:
                 page.screenshot(path=str(screenshot_dir / "results.png"), full_page=True)
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.screenshot(path=str(screenshot_dir / "desktop-results.png"), full_page=True)
             page.locator('input[value="128"]').uncheck()
             expect(page.locator("#results")).to_be_hidden()
             page.set_viewport_size({"width": 1280, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Desktop layout overflows"
             if screenshot_dir:
                 page.screenshot(path=str(screenshot_dir / "desktop.png"), full_page=True)
+            # All-oversized selections have feedback rather than an empty download panel.
+            for checkbox in page.locator('input[name="sizes"]').all():
+                checkbox.uncheck()
+            page.locator('input[value="128"]').check()
+            page.locator("#resizeButton").click()
+            expect(page.locator("#status")).to_contain_text("No icons generated")
+            expect(page.locator("#results")).to_be_hidden()
+
+            # Invalid replacements clear the preview and release its object URL.
+            previous_preview = page.locator("#imagePreview").get_attribute("src")
+            page.locator("#image").set_input_files({"name": "invalid.gif", "mimeType": "image/gif", "buffer": b"GIF89a"})
+            expect(page.locator("#error")).to_have_text("Choose a PNG, JPEG, or WebP image.")
+            expect(page.locator("#imagePreview")).to_be_hidden()
+            expect(page.locator("#previewEmpty")).to_be_visible()
+            assert page.evaluate("url => window.revokedUrls.includes(url)", previous_preview)
+
+            # Real JPEG and WebP uploads retain their format through the new UI.
+            page.locator('input[value="128"]').uncheck()
+            page.locator('input[value="32"]').first.check()
+            for image_format in ["jpeg", "webp"]:
+                source = subprocess.check_output(["node", "-e", f"""
+                  require('sharp')({{create: {{width: 96, height: 64, channels: 3, background: '#336699'}}}})
+                    .toFormat('{image_format}').toBuffer().then(bytes => process.stdout.write(bytes));
+                """], cwd=ROOT)
+                page.locator("#image").set_input_files({"name": f"source.{image_format}", "mimeType": f"image/{image_format}", "buffer": source})
+                expect(page.locator("#imageMeta")).to_contain_text("96 × 64 px")
+                page.locator("#resizeButton").click()
+                expect(page.locator("#resultLinks a")).to_have_count(1)
+                extension = "jpg" if image_format == "jpeg" else "webp"
+                expect(page.locator("#resultLinks a small")).to_have_text(f"{extension.upper()} · Download")
+                with page.expect_download() as download:
+                    page.locator("#resultLinks a").click()
+                assert download.value.suggested_filename.endswith(f"-32x32.{extension}")
+
+            # An image decoding failure must not leave a broken preview or stale results.
+            page.locator("#image").set_input_files({"name": "corrupt.png", "mimeType": "image/png", "buffer": b"not an image"})
+            expect(page.locator("#imageMeta")).to_contain_text("Preview unavailable")
+            expect(page.locator("#imagePreview")).to_be_hidden()
+            expect(page.locator("#previewEmpty")).to_be_visible()
+            expect(page.locator("#results")).to_be_hidden()
+            assert page.evaluate("window.revokedUrls.includes(window.previewUrls.at(-1))")
+            page.locator("#resizeButton").click()
+            expect(page.locator("#error")).to_contain_text("Unable to resize")
+            expect(page.locator("#resizeButton")).to_be_enabled()
+
             assert not errors, f"Browser errors: {errors}"
-            print("Browser smoke passed: keyboard, drop, validation, retry, loading, downloads, ZIP, mobile and desktop layout.")
+            print("Browser smoke passed: keyboard, preview lifecycle, unique counts, drop, validation, retry, loading, PNG/JPEG/WebP downloads, ZIP, skipped sizes, mobile and desktop layout.")
         finally:
             browser.close()
 

@@ -10,6 +10,12 @@
   const status = document.getElementById("status");
   const errorMessage = document.getElementById("error");
   const sizeInputs = [...document.querySelectorAll('input[name="sizes"]')];
+  const imagePreview = document.getElementById("imagePreview");
+  const previewEmpty = document.getElementById("previewEmpty");
+  const imageMeta = document.getElementById("imageMeta");
+  const selectionCount = document.getElementById("selectionCount");
+  const resultCount = document.getElementById("resultCount");
+  let previewUrl;
   let currentFiles = [];
   let resizing = false;
   let zipping = false;
@@ -26,7 +32,14 @@
     uploadForm.setAttribute("aria-busy", String(resizing));
   }
 
+  function selectedSizes() {
+    return [...new Set(sizeInputs.filter((input) => input.checked).map((input) => Number(input.value)))];
+  }
+
   function resetResults() {
+    const count = selectedSizes().length;
+    selectionCount.textContent = `${count} size${count === 1 ? "" : "s"} selected`;
+    resultCount.textContent = "";
     selectionVersion++;
     if (zipController) zipController.abort();
     currentFiles = [];
@@ -55,7 +68,30 @@
     const error = file ? validateFile(file) : "";
     errorMessage.textContent = error;
     fileInput.setAttribute("aria-invalid", String(Boolean(error)));
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = undefined;
+    imagePreview.removeAttribute("src");
+    imagePreview.hidden = true;
+    previewEmpty.hidden = false;
+    imageMeta.textContent = "Square crop preview";
+    if (file && !error) {
+      previewUrl = URL.createObjectURL(file);
+      imagePreview.src = previewUrl;
+      imagePreview.hidden = false;
+      previewEmpty.hidden = true;
+    }
   }
+
+  imagePreview.addEventListener("load", () => {
+    imageMeta.textContent = `${imagePreview.naturalWidth} × ${imagePreview.naturalHeight} px · Center crop preview`;
+  });
+  imagePreview.addEventListener("error", () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = undefined;
+    imagePreview.hidden = true;
+    previewEmpty.hidden = false;
+    imageMeta.textContent = "Preview unavailable. The server will validate your image.";
+  });
 
   // Handle file input change
   fileInput.addEventListener("change", () => {
@@ -101,8 +137,8 @@
       fileInput.focus();
       return;
     }
-    const selectedSizes = [...new Set(sizeInputs.filter((input) => input.checked).map((input) => Number(input.value)))];
-    if (!selectedSizes.length) {
+    const sizes = selectedSizes();
+    if (!sizes.length) {
       errorMessage.textContent = "Select at least one size.";
       sizeInputs[0].focus();
       return;
@@ -110,7 +146,7 @@
     const version = selectionVersion;
     const formData = new FormData();
     formData.append("image", fileInput.files[0]);
-    selectedSizes.forEach((size) => formData.append("sizes", String(size)));
+    sizes.forEach((size) => formData.append("sizes", String(size)));
     resizing = true;
     updateButtons();
     status.textContent = "Resizing your image…";
@@ -127,11 +163,23 @@
         const link = document.createElement("a");
         link.href = url;
         link.download = name;
-        link.textContent = `Download ${name}`;
+        const dimensions = /-(\d+)x\1\.(png|jpg|webp)$/.exec(name);
+        const label = document.createElement("span");
+        label.className = "result-label";
+        label.textContent = dimensions ? `${dimensions[1]} × ${dimensions[1]}` : name;
+        const format = document.createElement("small");
+        format.textContent = dimensions ? `${dimensions[2].toUpperCase()} · Download` : "Download image";
+        label.appendChild(format);
+        const arrow = document.createElement("span");
+        arrow.className = "download-arrow";
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.textContent = "↓";
+        link.append(label, arrow);
         resultLinks.appendChild(link);
       });
       resultsDiv.hidden = currentFiles.length === 0;
       downloadAllBtn.hidden = currentFiles.length === 0;
+      resultCount.textContent = `${currentFiles.length} icon${currentFiles.length === 1 ? "" : "s"} generated`;
       const skipped = Array.isArray(data.skippedSizes) ? data.skippedSizes : [];
       status.textContent = currentFiles.length
         ? `${currentFiles.length} icon${currentFiles.length === 1 ? "" : "s"} ready. Downloads expire after one hour.`

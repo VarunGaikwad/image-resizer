@@ -8,76 +8,109 @@
     <link rel="icon" type="image/png" sizes="48x48" href="/assets/icon-48x48.png" />
     <link rel="icon" type="image/png" sizes="128x128" href="/assets/icon-128x128.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icon-180x180.png" />
-    <title>Image Icon Resizer</title>
+    <meta name="description" content="Turn one image into a ready-to-download set of square icons for mobile, web, desktop, and wearables." />
+    <title>Image Icon Resizer — Your icon workspace</title>
     <link rel="stylesheet" href="/css/style.css" />
   </head>
   <body>
+    <header class="site-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Image Icon Resizer</div>
+      <span class="header-note">One source. Every size.</span>
+    </header>
     <main>
-      <h1>Image Icon Resizer</h1>
-      <p class="intro">Upload one image. Choose your sizes. Download your icons.</p>
-      <form id="uploadForm" enctype="multipart/form-data" novalidate>
-        <div id="dropArea" class="drop-area">
-          <label for="image">Choose an image or drop it here</label>
-          <input type="file" name="image" id="image" accept="image/png,image/jpeg,image/webp" aria-describedby="uploadHint selectedFile" required />
-          <p id="uploadHint">PNG, JPEG, or WebP · Up to 10 MiB and 40 megapixels. Animated images are not supported.</p>
-          <p id="selectedFile">No image selected.</p>
-        </div>
-        <p class="hint">Images are center-cropped to squares. Sizes larger than either image dimension are skipped. Downloads expire after one hour.</p>
-        <div class="size-groups">
-          <!-- Mobile -->
-          <fieldset class="size-group">
-            <legend>Mobile</legend>
-            <div class="sizes">
-              <label><input type="checkbox" name="sizes" value="24" /><span>24 × 24</span><small>Notifications and quick actions</small></label>
-              <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Small app icons</small></label>
-              <label><input type="checkbox" name="sizes" value="72" /><span>72 × 72</span><small>Tablet app icons</small></label>
-              <label><input type="checkbox" name="sizes" value="96" /><span>96 × 96</span><small>Higher-density Android icons</small></label>
-              <label><input type="checkbox" name="sizes" value="192" /><span>192 × 192</span><small>Progressive web app icons</small></label>
-              <label><input type="checkbox" name="sizes" value="512" /><span>512 × 512</span><small>Large app and store icons</small></label>
-            </div>
-          </fieldset>
-          <!-- Wearables -->
-          <fieldset class="size-group">
-            <legend>Wearables</legend>
-            <div class="sizes">
-              <label><input type="checkbox" name="sizes" value="18" /><span>18 × 18</span><small>Small watch icons and widgets</small></label>
-              <label><input type="checkbox" name="sizes" value="36" /><span>36 × 36</span><small>Watch app icons</small></label>
-              <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Higher-resolution watch icons</small></label>
-            </div>
-          </fieldset>
-          <!-- Web & Browser Extensions -->
-          <fieldset class="size-group">
-            <legend>Web &amp; browser extensions</legend>
-            <div class="sizes">
-              <label><input type="checkbox" name="sizes" value="16" /><span>16 × 16</span><small>Browser tabs and favicons</small></label>
-              <label><input type="checkbox" name="sizes" value="32" /><span>32 × 32</span><small>Higher-resolution favicons</small></label>
-              <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Browser toolbar icons</small></label>
-              <label><input type="checkbox" name="sizes" value="128" /><span>128 × 128</span><small>Large extension icons</small></label>
-            </div>
-          </fieldset>
-          <!-- Desktop / OS -->
-          <fieldset class="size-group">
-            <legend>Desktop / operating system</legend>
-            <div class="sizes">
-              <label><input type="checkbox" name="sizes" value="16" /><span>16 × 16</span><small>Small file explorer icons</small></label>
-              <label><input type="checkbox" name="sizes" value="32" /><span>32 × 32</span><small>Classic desktop icons</small></label>
-              <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Taskbar and system tray icons</small></label>
-              <label><input type="checkbox" name="sizes" value="256" /><span>256 × 256</span><small>High-density desktop icons</small></label>
-              <label><input type="checkbox" name="sizes" value="180" /><span>180 × 180</span><small>Apple touch icons</small></label>
-              <label><input type="checkbox" name="sizes" value="512" /><span>512 × 512</span><small>Large desktop icons</small></label>
-              <label><input type="checkbox" name="sizes" value="1024" /><span>1024 × 1024</span><small>High-resolution app artwork</small></label>
-            </div>
-          </fieldset>
-        </div>
-        <button type="submit" id="resizeButton">Resize image</button>
-      </form>
-      <p id="error" class="error" role="alert"></p>
-      <p id="status" role="status" aria-live="polite" aria-atomic="true"></p>
-      <section id="results" aria-label="Downloads" hidden>
-        <h2>Your icons</h2>
-        <div id="resultLinks"></div>
-        <button id="downloadAll" type="button" hidden>Download all as ZIP</button>
+      <section class="intro" aria-labelledby="pageTitle">
+        <div><p class="eyebrow">THE ICON WORKSPACE</p><h1 id="pageTitle">One image.<br /><span>A whole icon set.</span></h1></div>
+        <p class="intro-copy">One image, a whole set of icons.<br />Choose your sizes and get crisp, square assets for your next launch.</p>
       </section>
+      <form id="uploadForm" enctype="multipart/form-data" novalidate>
+        <section class="source-panel" aria-labelledby="sourceTitle">
+          <div class="section-heading"><span class="step">01</span><h2 id="sourceTitle">Your source image</h2></div>
+          <div class="source-card">
+            <div id="dropArea" class="drop-area">
+              <input class="file-input" type="file" name="image" id="image" accept="image/png,image/jpeg,image/webp" aria-describedby="uploadHint selectedFile" required />
+              <label class="file-picker" for="image">
+                <span class="preview-frame">
+                  <span id="previewEmpty" class="preview-empty">
+                    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="7" y="7" width="34" height="34" rx="7" stroke="currentColor" stroke-width="1.5"/><circle cx="18" cy="18" r="3" stroke="currentColor" stroke-width="1.5"/><path d="m8 33 10-9 7 6 6-7 10 10" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    <span>Drop your image here</span><small>A great icon starts here.</small>
+                  </span>
+                  <img id="imagePreview" alt="Center-cropped preview of your selected image" hidden />
+                </span>
+                <span class="picker-button"><span aria-hidden="true">+</span> Choose image</span>
+              </label>
+            </div>
+            <p id="selectedFile">No image selected.</p>
+            <p id="imageMeta" class="image-meta">Square crop preview</p>
+            <p id="uploadHint">PNG, JPEG, or WebP · Up to 10 MiB and 40 megapixels. Animated images are not supported.</p>
+          </div>
+          <div class="source-notes">
+            <h3>A few things to know</h3>
+            <p><span aria-hidden="true">↗</span> Original format. New dimensions.</p>
+            <p><span aria-hidden="true">⊞</span> Images are center-cropped to squares.</p>
+            <p><span aria-hidden="true">↓</span> No upscaling. Sizes larger than either image dimension are skipped.</p>
+            <p><span aria-hidden="true">◷</span> Downloads expire after one hour.</p>
+          </div>
+        </section>
+        <section class="sizes-panel" aria-labelledby="sizesTitle">
+          <div class="section-heading"><span class="step">02</span><h2 id="sizesTitle">Make it the right size</h2></div>
+          <div class="sizes-card">
+            <div class="sizes-intro"><p>Select sizes for your platforms.</p><span id="selectionCount" role="status" aria-live="polite">0 sizes selected</span></div>
+            <div class="size-groups">
+              <!-- Mobile -->
+              <fieldset class="size-group">
+                <legend>Mobile <span>Apps &amp; home screens</span></legend>
+                <div class="sizes">
+                  <label><input type="checkbox" name="sizes" value="24" /><span>24 × 24</span><small>Notifications and quick actions</small></label>
+                  <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Small app icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="72" /><span>72 × 72</span><small>Tablet app icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="96" /><span>96 × 96</span><small>Higher-density Android icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="192" /><span>192 × 192</span><small>Progressive web app icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="512" /><span>512 × 512</span><small>Large app and store icons</small></label>
+                </div>
+              </fieldset>
+              <!-- Web & Browser Extensions -->
+              <fieldset class="size-group">
+                <legend>Web &amp; browser <span>Tabs &amp; extensions</span></legend>
+                <div class="sizes">
+                  <label><input type="checkbox" name="sizes" value="16" /><span>16 × 16</span><small>Browser tabs and favicons</small></label>
+                  <label><input type="checkbox" name="sizes" value="32" /><span>32 × 32</span><small>Higher-resolution favicons</small></label>
+                  <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Browser toolbar icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="128" /><span>128 × 128</span><small>Large extension icons</small></label>
+                </div>
+              </fieldset>
+              <!-- Desktop / OS -->
+              <fieldset class="size-group">
+                <legend>Desktop <span>Dock &amp; operating system</span></legend>
+                <div class="sizes">
+                  <label><input type="checkbox" name="sizes" value="16" /><span>16 × 16</span><small>Small file explorer icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="32" /><span>32 × 32</span><small>Classic desktop icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Taskbar and system tray icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="256" /><span>256 × 256</span><small>High-density desktop icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="180" /><span>180 × 180</span><small>Apple touch icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="512" /><span>512 × 512</span><small>Large desktop icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="1024" /><span>1024 × 1024</span><small>High-resolution app artwork</small></label>
+                </div>
+              </fieldset>
+              <!-- Wearables -->
+              <fieldset class="size-group">
+                <legend>Wearables <span>Small screens, sharp details</span></legend>
+                <div class="sizes">
+                  <label><input type="checkbox" name="sizes" value="18" /><span>18 × 18</span><small>Small watch icons and widgets</small></label>
+                  <label><input type="checkbox" name="sizes" value="36" /><span>36 × 36</span><small>Watch app icons</small></label>
+                  <label><input type="checkbox" name="sizes" value="48" /><span>48 × 48</span><small>Higher-resolution watch icons</small></label>
+                </div>
+              </fieldset>
+            </div>
+            <div class="form-actions"><p>One download per unique size.<br /><span>Your image format stays the same.</span></p><button type="submit" id="resizeButton">Resize image</button></div>
+          </div>
+        </section>
+      </form>
+      <div class="feedback"><p id="error" class="error" role="alert"></p><p id="status" role="status" aria-live="polite" aria-atomic="true"></p></div>
+      <section id="results" aria-labelledby="resultsTitle" hidden>
+        <div class="results-heading"><div class="section-heading"><span class="step">03</span><h2 id="resultsTitle">Ready for your next launch</h2></div><span id="resultCount" class="result-count"></span></div>
+        <div class="results-card"><div class="download-heading"><div><h3>Your icon set</h3><p>Download individually or take the whole collection.</p></div><button id="downloadAll" type="button" hidden>Download all as ZIP</button></div><div id="resultLinks"></div><p class="expiry-note">Save your files within one hour. You can always resize your image again.</p></div>
+      </section>
+      <footer class="site-footer"><span>Made for the details.</span><span>Mobile · Web · Desktop · Wearables</span></footer>
     </main>
     <script src="/js/main.js"></script>
   </body>
