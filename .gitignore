@@ -1,4 +1,7 @@
-package-lock.json
 node_modules/
 resized/
 uploads/
+.pi/
+.venv/
+__pycache__/
+test-artifacts/

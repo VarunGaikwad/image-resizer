@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "npm install && mkdir -p uploads resized"
+    "build": "npm run check",
+    "check": "node --check server.js && node --check public/js/main.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
   },
   "author": "Varun Gaikwad<gaikwadvarun23@gmail.com>",
   "license": "MIT",
@@ -28,6 +33,6 @@
     "archiver": "^7.0.1",
     "express": "^4.18.2",
     "multer": "^2.0.1",
-    "sharp": "^0.33.0"
+    "sharp": "^0.35.5"
   }
 }
