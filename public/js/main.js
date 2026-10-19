@@ -15,6 +15,8 @@
   const imageMeta = document.getElementById("imageMeta");
   const selectionCount = document.getElementById("selectionCount");
   const resultCount = document.getElementById("resultCount");
+  let uploadBytes;
+  let configError = "";
   let previewUrl;
   let currentFiles = [];
   let resizing = false;
@@ -23,8 +25,9 @@
   let selectionVersion = 0;
 
   function updateButtons() {
-    resizeButton.disabled = resizing;
-    resizeButton.textContent = resizing ? "Resizing…" : "Resize image";
+    resizeButton.disabled = resizing || !uploadBytes;
+    resizeButton.textContent = resizing ? "Resizing…" : uploadBytes ? "Resize image" : "Loading limits…";
+    if (configError) errorMessage.textContent = configError;
     fileInput.disabled = resizing;
     sizeInputs.forEach((input) => { input.disabled = resizing; });
     downloadAllBtn.disabled = resizing || zipping || currentFiles.length === 0;
@@ -57,7 +60,7 @@
     if ((file.type && !supported.includes(file.type)) || (!file.type && !/\.(png|jpe?g|webp)$/i.test(file.name))) {
       return "Choose a PNG, JPEG, or WebP image.";
     }
-    if (file.size > 10 * 1024 * 1024) return "Image exceeds the 10 MiB upload limit.";
+    if (uploadBytes && file.size > uploadBytes) return `Image exceeds the ${uploadBytes / (1024 * 1024)} MiB upload limit.`;
     return "";
   }
 
@@ -66,7 +69,7 @@
     const file = fileInput.files[0];
     document.getElementById("selectedFile").textContent = file ? `Selected: ${file.name}` : "No image selected.";
     const error = file ? validateFile(file) : "";
-    errorMessage.textContent = error;
+    errorMessage.textContent = error || configError;
     fileInput.setAttribute("aria-invalid", String(Boolean(error)));
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = undefined;
@@ -92,6 +95,23 @@
     previewEmpty.hidden = false;
     imageMeta.textContent = "Preview unavailable. The server will validate your image.";
   });
+
+  updateButtons();
+  fetch("/config")
+    .then(async (response) => {
+      const data = await response.json();
+      if (!response.ok || !Number.isSafeInteger(data.uploadBytes) || data.uploadBytes <= 0) {
+        throw new Error("Invalid upload limits.");
+      }
+      uploadBytes = data.uploadBytes;
+      document.getElementById("uploadLimit").textContent = `Up to ${uploadBytes / (1024 * 1024)} MiB`;
+      updateDropAreaText();
+    })
+    .catch(() => {
+      configError = "Unable to load upload limits. Reload this page to try again.";
+      document.getElementById("uploadLimit").textContent = "Upload limit unavailable";
+    })
+    .finally(updateButtons);
 
   // Handle file input change
   fileInput.addEventListener("change", () => {
@@ -128,7 +148,7 @@
   // Handle form submit
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (resizing) return;
+    if (resizing || !uploadBytes) return;
     resetResults();
     const fileError = validateFile(fileInput.files[0]);
     if (fileError) {

@@ -8,10 +8,12 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const sharp = require("sharp");
 const { createApp } = require("../server");
+const { createBlobStorage } = require("../blob-storage");
+const { blobSdkFixture } = require("./blob-sdk-fixture");
 
-async function fixture(t, limits = {}) {
+async function fixture(t, limits = {}, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "image-resizer-test-"));
-  const app = createApp({ storageRoot: root, limits, logger: () => {} });
+  const app = createApp({ ...options, storageRoot: root, limits, logger: () => {} });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(async () => {
@@ -297,6 +299,121 @@ test("busy processing returns 503 and releases capacity after upload disconnect"
   req.destroy();
   await waitFor(async () => (await fs.readdir(path.join(f.root, "uploads"))).length === 0);
   assert.equal((await f.upload([16])).status, 200);
+});
+
+test("Blob outputs survive a different instance and leave no local files after processing", async (t) => {
+  const cloud = blobSdkFixture();
+  const a = await fixture(t, {}, { blobStore: createBlobStorage(cloud.sdk) });
+  const b = await fixture(t, {}, { blobStore: createBlobStorage(cloud.sdk) });
+  const response = await a.upload();
+  assert.equal(response.status, 200);
+  const { resizedImages, skippedSizes } = await response.json();
+  assert.deepEqual(skippedSizes, [128]);
+  assert.equal(resizedImages.length, 2);
+  assert.equal(cloud.blobs.size, 2);
+  await a.assertClean();
+  assert.deepEqual(await fs.readdir(path.join(a.root, "resized")), []);
+  const downloaded = new Map();
+  for (const file of resizedImages) {
+    const result = await fetch(`${b.base}${file.url}`);
+    assert.equal(result.status, 200);
+    assert.match(result.headers.get("cache-control"), /no-store/);
+    assert.match(result.headers.get("content-disposition"), /attachment/);
+    const bytes = Buffer.from(await result.arrayBuffer());
+    assert.equal((await sharp(bytes).metadata()).height, Number(/-(\d+)x/.exec(file.name)[1]));
+    downloaded.set(file.name, bytes);
+  }
+  const zip = await b.zip([...downloaded.keys()]);
+  assert.equal(zip.status, 200);
+  for (const entry of readZip(Buffer.from(await zip.arrayBuffer()))) {
+    assert.deepEqual(entry.data, downloaded.get(entry.name));
+  }
+  assert.equal(readZip(Buffer.from(await (await b.zip([resizedImages[0].name, resizedImages[0].name])).arrayBuffer())).length, 1);
+});
+
+test("failed Blob uploads remove partial remote and local outputs and permit retries", async (t) => {
+  const cloud = blobSdkFixture();
+  const f = await fixture(t, {}, { blobStore: createBlobStorage(cloud.sdk) });
+  cloud.failSecondWrite();
+  const response = await f.upload([16, 32]);
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: "Unable to process request. Please try again." });
+  assert.equal(cloud.blobs.size, 0);
+  assert.deepEqual(await fs.readdir(path.join(f.root, "resized")), []);
+  await f.assertClean();
+  assert.equal((await f.upload([16])).status, 200);
+});
+
+test("Blob downloads validate names, expiry, missing files and ZIP limits before opening streams", async (t) => {
+  const cloud = blobSdkFixture();
+  const f = await fixture(t, { zipBytes: 1 }, { blobStore: createBlobStorage(cloud.sdk) });
+  const { resizedImages: [file] } = await (await f.upload([16])).json();
+  assert.equal((await f.zip([file.name])).status, 413);
+  assert.deepEqual(cloud.opened, []);
+  assert.equal((await f.zip(["../package.json"])).status, 400);
+  assert.equal((await fetch(`${f.base}/resized/invalid.png`)).status, 400);
+  const missing = `${randomUUID()}-16x16.png`;
+  assert.equal((await f.zip([missing])).status, 404);
+  assert.equal((await fetch(`${f.base}/resized/${missing}`)).status, 404);
+  const stored = cloud.blobs.get(cloud.uploads[0]);
+  stored.uploadedAt = new Date(Date.now() - 61 * 60 * 1000);
+  assert.equal((await fetch(`${f.base}${file.url}`)).status, 410);
+  assert.equal((await f.zip([file.name])).status, 410);
+  assert.deepEqual(cloud.opened, []);
+});
+
+test("authenticated cleanup paginates Blob outputs, respects deletion grace, and leaves other files alone", async (t) => {
+  const cloud = blobSdkFixture();
+  const f = await fixture(t, {}, { blobStore: createBlobStorage(cloud.sdk), cronSecret: "test-secret" });
+  const { resizedImages } = await (await f.upload([16, 24, 32, 48])).json();
+  const paths = cloud.uploads;
+  for (const pathname of paths.slice(0, 3)) cloud.blobs.get(pathname).uploadedAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  cloud.blobs.get(paths[3]).uploadedAt = new Date(Date.now() - 61 * 60 * 1000);
+  const legacy = "image-resizer/v1/legacy.png";
+  const unrelated = `other-app/${randomUUID()}-16x16.png`;
+  cloud.blobs.set(legacy, { bytes: Buffer.alloc(0), uploadedAt: new Date(0) });
+  cloud.blobs.set(unrelated, { bytes: Buffer.alloc(0), uploadedAt: new Date(0) });
+  assert.equal((await fetch(`${f.base}/api/cleanup`)).status, 401);
+  assert.equal((await fetch(`${f.base}/api/cleanup`, { headers: { Authorization: "Bearer wrong" } })).status, 401);
+  assert.equal(cloud.blobs.size, 6);
+  const response = await fetch(`${f.base}/api/cleanup`, { headers: { Authorization: "Bearer test-secret" } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "ok" });
+  assert.deepEqual([...cloud.blobs.keys()].sort(), [paths[3], legacy, unrelated].sort());
+  assert.equal((await fetch(`${f.base}${resizedImages[0].url}`)).status, 404);
+  assert.equal((await fetch(`${f.base}${resizedImages[3].url}`)).status, 410);
+  t.mock.method(cloud.sdk, "list", async () => { throw new Error("Unavailable"); });
+  assert.equal((await fetch(`${f.base}/api/cleanup`, { headers: { Authorization: "Bearer test-secret" } })).status, 503);
+});
+
+test("cloud stream open failures release earlier streams and return JSON before ZIP headers", async (t) => {
+  const cloud = blobSdkFixture();
+  const f = await fixture(t, {}, { blobStore: createBlobStorage(cloud.sdk) });
+  const { resizedImages } = await (await f.upload([16, 32])).json();
+  let firstStream;
+  t.mock.method(cloud.sdk, "get", async (pathname) => {
+    if (pathname.endsWith(resizedImages[1].name)) return null;
+    const bytes = cloud.blobs.get(pathname).bytes;
+    return { stream: new ReadableStream({ start(controller) { controller.enqueue(bytes); }, cancel() { firstStream = "cancelled"; } }) };
+  });
+  const response = await f.zip(resizedImages.map((file) => file.name));
+  assert.equal(response.status, 404);
+  assert.equal(typeof (await response.json()).error, "string");
+  await waitFor(async () => firstStream === "cancelled");
+});
+
+test("upload configuration reflects each deployment and missing cron secrets never authorize cleanup", async (t) => {
+  const local = await fixture(t);
+  const vercel = await fixture(t, { uploadBytes: 4 * 1024 * 1024 }, { cronSecret: "" });
+  assert.deepEqual(await (await fetch(`${local.base}/config`)).json(), { uploadBytes: 10 * 1024 * 1024 });
+  const response = await fetch(`${vercel.base}/config`);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { uploadBytes: 4 * 1024 * 1024 });
+  assert.equal((await fetch(`${vercel.base}/api/cleanup`, { headers: { Authorization: "Bearer undefined" } })).status, 401);
+  const tooLarge = await vercel.upload([16], Buffer.alloc(4 * 1024 * 1024 + 1));
+  assert.equal(tooLarge.status, 413);
+  assert.deepEqual(await tooLarge.json(), { error: "Image exceeds the 4 MiB upload limit." });
+  await vercel.assertClean();
 });
 
 async function waitFor(predicate) {

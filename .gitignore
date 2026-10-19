@@ -5,3 +5,6 @@ uploads/
 .venv/
 __pycache__/
 test-artifacts/
+.vercel/
+.env
+.env.*

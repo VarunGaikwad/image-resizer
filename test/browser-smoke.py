@@ -229,8 +229,33 @@ def run(url, screenshot_dir):
             expect(page.locator("#error")).to_contain_text("Unable to resize")
             expect(page.locator("#resizeButton")).to_be_enabled()
 
+            # Deployment limits arrive before submission is enabled, including Vercel's 4 MiB cap.
+            pending_config = []
+            page.route("**/config", lambda route: pending_config.append(route))
+            page.reload()
+            expect(page.locator("#resizeButton")).to_have_text("Loading limits…")
+            expect(page.locator("#resizeButton")).to_be_disabled()
+            pending_config[0].fulfill(status=200, content_type="application/json", body=json.dumps({"uploadBytes": 4 * 1024 * 1024}))
+            expect(page.locator("#uploadLimit")).to_have_text("Up to 4 MiB")
+            expect(page.locator("#resizeButton")).to_be_enabled()
+            attempts = []
+            page.on("request", lambda req: attempts.append(req.url) if req.method == "POST" and req.url.endswith("/resize") else None)
+            page.locator("#image").set_input_files({"name": "large.png", "mimeType": "image/png", "buffer": b"0" * (4 * 1024 * 1024 + 1)})
+            page.locator("#resizeButton").click()
+            expect(page.locator("#error")).to_have_text("Image exceeds the 4 MiB upload limit.")
+            assert not attempts, "Oversized image was uploaded despite deployment cap"
+            page.unroute("**/config")
+
+            # Missing configuration fails closed instead of falling back to the wrong upload cap.
+            for status_code, body in [(503, {}), (200, {"uploadBytes": "invalid"})]:
+                page.route("**/config", lambda route, request, code=status_code, data=body: route.fulfill(status=code, content_type="application/json", body=json.dumps(data)))
+                page.reload()
+                expect(page.locator("#error")).to_contain_text("Reload this page")
+                expect(page.locator("#resizeButton")).to_be_disabled()
+                page.unroute("**/config")
+
             assert not errors, f"Browser errors: {errors}"
-            print("Browser smoke passed: keyboard, preview lifecycle, unique counts, drop, validation, retry, loading, PNG/JPEG/WebP downloads, ZIP, skipped sizes, mobile and desktop layout.")
+            print("Browser smoke passed: keyboard, preview lifecycle, unique counts, drop, validation, retry, loading, PNG/JPEG/WebP downloads, ZIP, skipped sizes, deployment limits, mobile and desktop layout.")
         finally:
             browser.close()
 

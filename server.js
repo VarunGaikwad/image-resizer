@@ -25,7 +25,7 @@ function httpError(status, message) {
   return Object.assign(new Error(message), { status, expose: true });
 }
 
-function createApp({ storageRoot = __dirname, limits = {}, logger = console.log } = {}) {
+function createApp({ storageRoot = __dirname, limits = {}, logger = console.log, blobStore, cronSecret = process.env.CRON_SECRET } = {}) {
   const config = { ...LIMITS, ...limits };
   const uploads = path.resolve(storageRoot, "uploads");
   const resized = path.resolve(storageRoot, "resized");
@@ -54,6 +54,18 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
   });
   app.use(express.static(path.join(__dirname, "public")));
   app.get("/health", (req, res) => res.json({ status: "ok" }));
+  app.get("/config", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ uploadBytes: config.uploadBytes });
+  });
+  app.get("/api/cleanup", asyncRoute(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    if (!cronSecret || req.get("Authorization") !== `Bearer ${cronSecret}`) {
+      throw httpError(401, "Unauthorized.");
+    }
+    if (!await cleanupExpired()) throw httpError(503, "Cleanup failed. Please retry.");
+    res.json({ status: "ok" });
+  }));
 
   async function removeFiles(files) {
     await Promise.all(files.map(async (file) => {
@@ -65,6 +77,15 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     }));
   }
 
+  async function removeCloudFiles(names) {
+    if (!blobStore || !names.length) return;
+    try {
+      await blobStore.remove(names);
+    } catch (error) {
+      log({ event: "cleanup_error", code: error.code || "UNKNOWN" });
+    }
+  }
+
   app.post("/resize", asyncRoute(async (req, res) => {
     if (processing >= config.concurrent) {
       res.set("Retry-After", "2");
@@ -72,6 +93,7 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     }
     processing++;
     const outputs = [];
+    const cloudOutputs = [];
     let completed = false;
     let payload;
     try {
@@ -124,24 +146,32 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
         await sharp(req.file.path, { limitInputPixels: config.inputPixels })
           .rotate().resize(size, size, { fit: "cover", withoutEnlargement: true })
           .toFormat(metadata.format).toFile(outputPath);
+        if (blobStore) {
+          cloudOutputs.push(name);
+          await blobStore.write(name, outputPath);
+          await removeFiles([outputPath]);
+        }
         resizedImages.push({ name, url: `/resized/${name}` });
       }
       payload = { resizedImages, skippedSizes: sizes.filter((size) => !available.includes(size)) };
       completed = !req.aborted && !res.destroyed;
     } finally {
       // Cleanup must also run for invalid input, processing failures, and disconnected clients.
-      await removeFiles([...(req.file ? [req.file.path] : []), ...(!completed ? outputs : [])]);
+      await removeFiles([...(req.file ? [req.file.path] : []), ...(blobStore || !completed ? outputs : [])]);
+      if (!completed) await removeCloudFiles(cloudOutputs);
       processing--;
     }
     if (completed) res.json(payload);
   }));
 
-  async function acquireFiles(names) {
+  async function acquireFiles(names, maxBytes = Infinity) {
     const held = [];
+    const streams = [];
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
+      for (const stream of streams) stream.destroy();
       for (const name of held) {
         const count = activeDownloads.get(name) - 1;
         if (count) activeDownloads.set(name, count);
@@ -159,15 +189,30 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
         const filePath = path.join(resized, name);
         let stat;
         try {
-          stat = await fsp.lstat(filePath);
+          stat = blobStore ? await blobStore.stat(name) : await fsp.lstat(filePath);
         } catch (error) {
           if (error.code === "ENOENT") throw httpError(404, "Download not found or expired. Resize your image again.");
           throw error;
         }
-        if (!stat.isFile()) throw httpError(400, "Invalid generated file.");
+        if (!stat) throw httpError(404, "Download not found or expired. Resize your image again.");
+        if (!blobStore && !stat.isFile()) throw httpError(400, "Invalid generated file.");
         if (Date.now() - stat.mtimeMs >= config.retentionMs) throw httpError(410, "Download expired. Resize your image again.");
         return { name, path: filePath, size: stat.size };
       }));
+      if (files.reduce((bytes, file) => bytes + file.size, 0) > maxBytes) {
+        throw httpError(413, "ZIP exceeds the 100 MiB limit. Download fewer files.");
+      }
+      if (blobStore) {
+        for (const file of files) {
+          file.stream = await blobStore.open(file.name);
+          if (!file.stream) throw httpError(404, "Download not found or expired. Resize your image again.");
+          // Streams may fail while another file is being opened, before a consumer is attached.
+          file.stream.on("error", () => {});
+          streams.push(file.stream);
+        }
+        const failed = streams.find((stream) => stream.errored);
+        if (failed) throw failed.errored;
+      }
       return { files, release };
     } catch (error) {
       release();
@@ -179,10 +224,21 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     const { files, release } = await acquireFiles([req.params.name]);
     res.once("close", release);
     res.set("Cache-Control", "private, no-store");
-    res.download(files[0].path, files[0].name, (error) => {
-      release();
-      if (error && !res.destroyed) next(error);
-    });
+    if (req.aborted || res.destroyed) return release();
+    if (blobStore) {
+      res.type(path.extname(files[0].name));
+      res.attachment(files[0].name);
+      files[0].stream.on("error", () => {
+        release();
+        res.destroy();
+      });
+      files[0].stream.pipe(res);
+    } else {
+      res.download(files[0].path, files[0].name, (error) => {
+        release();
+        if (error && !res.destroyed) next(error);
+      });
+    }
   }));
 
   app.post("/download-zip", express.json({ limit: "16kb", strict: true }), asyncRoute(async (req, res) => {
@@ -190,11 +246,8 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     if (!Array.isArray(files) || !files.length || files.length > config.entries) {
       throw httpError(400, `Provide an array of 1–${config.entries} generated filenames.`);
     }
-    const held = await acquireFiles([...new Set(files)]);
-    if (held.files.reduce((bytes, file) => bytes + file.size, 0) > config.zipBytes) {
-      held.release();
-      throw httpError(413, "ZIP exceeds the 100 MiB limit. Download fewer files.");
-    }
+    const held = await acquireFiles([...new Set(files)], config.zipBytes);
+    if (req.aborted || res.destroyed) return held.release();
     const archive = archiver("zip", { store: true });
     const fail = (error) => {
       log({ event: "archive_error", code: error.code || "UNKNOWN" });
@@ -213,14 +266,29 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     archive.pipe(res);
     archive.on("end", held.release);
     archive.on("close", held.release);
-    for (const file of held.files) archive.file(file.path, { name: file.name });
+    for (const file of held.files) {
+      if (blobStore) {
+        file.stream.on("error", fail);
+        archive.append(file.stream, { name: file.name });
+      } else {
+        archive.file(file.path, { name: file.name });
+      }
+    }
     archive.finalize().catch(fail);
   }));
 
   async function cleanupExpired() {
-    if (cleanupRunning) return;
+    if (cleanupRunning) return false;
     cleanupRunning = true;
     try {
+      if (blobStore) {
+        for await (const file of blobStore.entries()) {
+          if (!OUTPUT_NAME.test(file.name) || activeDownloads.has(file.name)) continue;
+          if (Date.now() - file.mtimeMs < config.retentionMs + blobStore.cleanupGraceMs) continue;
+          await blobStore.remove([file.name]);
+        }
+        return true;
+      }
       for (const name of await fsp.readdir(resized)) {
         if (!OUTPUT_NAME.test(name) || activeDownloads.has(name) || deleting.has(name)) continue;
         const filePath = path.join(resized, name);
@@ -233,14 +301,16 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
           deleting.delete(name);
         }
       }
+      return true;
     } catch (error) {
       log({ event: "cleanup_error", code: error.code || "UNKNOWN" });
+      return false;
     } finally {
       cleanupRunning = false;
     }
   }
-  const cleanupTimer = setInterval(cleanupExpired, config.cleanupIntervalMs);
-  cleanupTimer.unref();
+  const cleanupTimer = blobStore ? null : setInterval(cleanupExpired, config.cleanupIntervalMs);
+  cleanupTimer?.unref();
   app.locals.cleanupExpired = cleanupExpired;
   app.locals.closeStorage = () => clearInterval(cleanupTimer);
 
@@ -251,7 +321,7 @@ function createApp({ storageRoot = __dirname, limits = {}, logger = console.log 
     let message = error.expose || status < 500 ? error.message : "Unable to process request. Please try again.";
     if (error instanceof multer.MulterError) {
       status = error.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-      message = status === 413 ? "Image exceeds the 10 MiB upload limit." : "Invalid upload or too many form fields.";
+      message = status === 413 ? `Image exceeds the ${config.uploadBytes / (1024 * 1024)} MiB upload limit.` : "Invalid upload or too many form fields.";
     } else if (error.type === "entity.parse.failed") {
       status = 400;
       message = "Invalid JSON body.";

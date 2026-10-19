@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "build": "npm run check",
-    "check": "node --check server.js && node --check public/js/main.js",
+    "check": "node --check server.js && node --check blob-storage.js && node --check api/index.js && node --check public/js/main.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {
@@ -30,6 +30,7 @@
   },
   "homepage": "https://github.com/VarunGaikwad/image-resizer#readme",
   "dependencies": {
+    "@vercel/blob": "^2.8.2",
     "archiver": "^7.0.1",
     "express": "^4.18.2",
     "multer": "^2.0.1",
